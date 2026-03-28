@@ -1,3 +1,5 @@
+
+import mujoco
 xml = """
 <mujoco>
   <worldbody>
@@ -6,3 +8,16 @@ xml = """
   </worldbody>
 </mujoco>
 """
+
+
+def load_model(model_string: str = "", model_path: str = "") -> mujoco.MjModel:
+    if model_string:
+        model = mujoco.MjModel.from_xml_string(model_string)
+    elif model_path:
+        model = mujoco.MjModel.from_xml_path(model_path)
+    return model
+
+
+def load_data(model: mujoco.MjModel) -> mujoco.MjData:
+    data = mujoco.MjData(model)
+    return data

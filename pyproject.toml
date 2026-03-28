@@ -7,7 +7,8 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "mujoco (>=3.6.0,<4.0.0)"
+    "mujoco (>=3.6.0,<4.0.0)",
+    "mediapy (>=1.2.6,<2.0.0)"
 ]
 
 
