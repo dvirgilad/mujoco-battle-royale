@@ -1,0 +1,16 @@
+[project]
+name = "mujoco-battle-royale"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "dvirgilad",email = "dvirg8@outlook.com"}
+]
+requires-python = ">=3.12"
+dependencies = [
+    "mujoco (>=3.6.0,<4.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
