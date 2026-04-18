@@ -3,7 +3,8 @@ name = "mujoco-battle-royale"
 version = "0.1.0"
 description = ""
 authors = [
-    {name = "dvirgilad",email = "dvirg8@outlook.com"}
+    {name = "dvirgilad",email = "dvirg8@outlook.com"},
+    {name = "oshribelay",email = "oshri.belay@gmail.com"}
 ]
 requires-python = ">=3.12,<3.13"
 dependencies = [
