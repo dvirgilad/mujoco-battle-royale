@@ -1,2 +1,6 @@
 *.pyc
 .vscode/*
+
+.remember/*
+
+CLAUDE.md
