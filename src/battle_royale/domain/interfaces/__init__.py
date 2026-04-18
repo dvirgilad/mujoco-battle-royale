@@ -1,3 +1,3 @@
-from .environment import IBattleRoyaleEnv
-from .logger import ILogger
-from .policy import IPolicy
+from .environment import IBattleRoyaleEnv as IBattleRoyaleEnv
+from .logger import ILogger as ILogger
+from .policy import IPolicy as IPolicy
