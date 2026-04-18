@@ -5,13 +5,31 @@ description = ""
 authors = [
     {name = "dvirgilad",email = "dvirg8@outlook.com"}
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "mujoco (>=3.6.0,<4.0.0)",
-    "mediapy (>=1.2.6,<2.0.0)"
+    "mediapy (>=1.2.6,<2.0.0)",
+    "mujoco-python-viewer (>=0.1.4,<0.2.0)",
+    "pettingzoo (>=1.25.0,<2.0.0)",
+    "stable-baselines3 (>=2.8.0,<3.0.0)",
+    "wandb (>=0.26.0,<0.27.0)",
+    "gymnasium (>=1.2.3,<2.0.0)",
+    "pyyaml (>=6.0.3,<7.0.0)",
+    "supersuit (>=3.10.0,<4.0.0)"
 ]
 
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pytest (>=9.0.3,<10.0.0)",
+    "pytest-cov (>=7.1.0,<8.0.0)"
+]
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
