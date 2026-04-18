@@ -1,2 +1,2 @@
-from .agent import Agent
-from .arena import Arena
+from .agent import Agent as Agent
+from .arena import Arena as Arena
