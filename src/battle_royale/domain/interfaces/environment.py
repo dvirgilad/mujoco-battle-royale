@@ -2,6 +2,7 @@ from typing import Protocol
 import numpy as np
 from battle_royale.domain.entities.agent import Agent
 
+
 class IBattleRoyaleEnv(Protocol):
     def reset(self, num_agents: int) -> dict[str, Agent]: ...
     def step(self, actions: dict[str, np.ndarray]) -> tuple[dict, dict, dict, dict]: ...

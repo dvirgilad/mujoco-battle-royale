@@ -5,7 +5,7 @@ if __name__ == "__main__":
     import glfw
     import os
 
-    os.environ["XDG_SESSION_TYPE"] = "x11" #
+    os.environ["XDG_SESSION_TYPE"] = "x11"  #
     os.environ["MUJOCO_GL"] = "egl"
     os.environ["PYOPENGL_PLATFORM"] = "egl"
     if not glfw.init():
@@ -14,5 +14,5 @@ if __name__ == "__main__":
         model = load_model()
         data = load_data(model)
         render(model, data, "output.png")
-    
+
     glfw.terminate()

@@ -1,7 +1,5 @@
-
-
 def build() -> str:
-    '''Builds the XML string for the Mujoco model.'''
+    """Builds the XML string for the Mujoco model."""
     return """
         <mujoco>
           <worldbody>
@@ -13,4 +11,3 @@ def build() -> str:
             </worldbody>
         </mujoco>
     """
-
