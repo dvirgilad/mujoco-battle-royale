@@ -77,14 +77,19 @@ def test_xml_builder_spawn_positions_on_ring():
         parts = pos_str.split()
         x, y = float(parts[0]), float(parts[1])
         actual_r = math.sqrt(x**2 + y**2)
-        assert abs(actual_r - spawn_r) < 1e-4, f"Agent {i} spawn radius {actual_r} != {spawn_r}"
+        assert abs(actual_r - spawn_r) < 1e-4, (
+            f"Agent {i} spawn radius {actual_r} != {spawn_r}"
+        )
 
 
 def test_xml_builder_agent_colors_cycle():
     xml_str = XMLBuilder.build(num_agents=4, arena_radius=3.0, max_force=10.0)
     root = parse(xml_str)
     expected_colors = [
-        (1, 0, 0), (0, 0, 1), (0, 1, 0), (1, 1, 0),
+        (1, 0, 0),
+        (0, 0, 1),
+        (0, 1, 0),
+        (1, 1, 0),
     ]
     for i, (r, g, b) in enumerate(expected_colors):
         body = root.find(f".//body[@name='agent_{i}']")
