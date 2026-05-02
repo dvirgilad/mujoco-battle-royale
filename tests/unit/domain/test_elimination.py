@@ -12,9 +12,7 @@ def arena():
 
 
 def make_agent(x: float, y: float, alive: bool = True) -> Agent:
-    return Agent(
-        id="a0", position=np.array([x, y]), velocity=np.zeros(2), alive=alive
-    )
+    return Agent(id="a0", position=np.array([x, y]), velocity=np.zeros(2), alive=alive)
 
 
 def test_agent_inside_arena_not_eliminated(arena):

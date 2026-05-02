@@ -17,8 +17,16 @@ def test_survival_reward_when_nothing_changes():
 
 
 def test_reward_for_eliminating_one_opponent():
-    prev = {"a0": make_agent("a0", True), "a1": make_agent("a1", True), "a2": make_agent("a2", True)}
-    curr = {"a0": make_agent("a0", True), "a1": make_agent("a1", False), "a2": make_agent("a2", True)}
+    prev = {
+        "a0": make_agent("a0", True),
+        "a1": make_agent("a1", True),
+        "a2": make_agent("a2", True),
+    }
+    curr = {
+        "a0": make_agent("a0", True),
+        "a1": make_agent("a1", False),
+        "a2": make_agent("a2", True),
+    }
     reward = RewardCalculator.compute(prev, curr, "a0")
     assert pytest.approx(reward, abs=1e-6) == 1.01
 
