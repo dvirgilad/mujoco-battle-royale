@@ -64,4 +64,6 @@ def test_sample_path_is_random(pool):
         pool.save(mock_model, step=step)
     # Sample multiple times — should occasionally differ (probabilistic)
     paths = {pool.sample_path() for _ in range(50)}
-    assert len(paths) > 1  # With 3 paths and 50 samples, very unlikely to get same every time
+    assert (
+        len(paths) > 1
+    )  # With 3 paths and 50 samples, very unlikely to get same every time
