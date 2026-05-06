@@ -23,6 +23,7 @@ class BattleRoyaleEnv(ParallelEnv):
         self._config = config
         self._arena = Arena(radius=config.arena.radius)
         self._num_agents = config.training.num_agents
+        self.render_mode = None
         self.possible_agents = [f"agent_{i}" for i in range(self._num_agents)]
         self.agents: list[str] = []
         self._agent_objects: list = []
