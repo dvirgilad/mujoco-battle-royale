@@ -2,6 +2,7 @@
 Usage:
     python -m battle_royale.interfaces.cli.train --config config/experiments/4v4_baseline.yaml
 """
+
 from __future__ import annotations
 
 import argparse

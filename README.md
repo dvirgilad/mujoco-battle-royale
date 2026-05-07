@@ -75,8 +75,6 @@ poetry run pre-commit install
 
 ## Usage
 
-> **Note:** The CLI (`train` / `evaluate` commands) is not yet implemented. Current usage is via the Python API directly.
-
 ### Run the physics environment
 
 ```python
@@ -104,6 +102,18 @@ arena = Arena(radius=config.arena.radius)
 for agent in agents.values():
     obs = ObservationBuilder.build(agent, list(agents.values()), arena)
     # obs.shape == (17,), dtype float32
+```
+
+### Train
+
+```bash
+python -m battle_royale.interfaces.cli.train --config config/experiments/4v4_baseline.yaml --run-dir runs/4v4_baseline
+```
+
+### Evaluate
+
+```bash
+python -m battle_royale.interfaces.cli.evaluate --checkpoint runs/4v4_baseline/snapshots/latest --num-agents 6
 ```
 
 ### Legacy renderer
@@ -183,22 +193,20 @@ Pre-commit hooks run Ruff automatically on each commit.
 | Infrastructure | `XMLBuilder` (MJCF for N agents) | Done |
 | Infrastructure | `YamlLoader` + `Config` dataclasses | Done |
 | Infrastructure | `WandBLogger` | Done |
-| Infrastructure | `VideoRecorder` | In progress |
-| Interfaces | `BattleRoyaleEnv` (PettingZoo wrapper) | In progress |
-| Application | `EloRatingSystem` (K=32) | Planned |
-| Application | `MetricsTracker` | Planned |
-| Application | `SnapshotPool` | Planned |
-| Application | `Trainer` (SB3 PPO self-play) | Planned |
-| Application | `Evaluator` | Planned |
-| Interfaces | CLI (`train`, `evaluate`) | Planned |
-| Testing | Integration test: full env loop | Planned |
-| Testing | Coverage gate ≥80% | Planned |
+| Infrastructure | `VideoRecorder` | Done |
+| Interfaces | `BattleRoyaleEnv` (PettingZoo wrapper) | Done |
+| Application | `EloRatingSystem` (K=32) | Done |
+| Application | `MetricsTracker` | Done |
+| Application | `SnapshotPool` | Done |
+| Application | `Trainer` (SB3 PPO self-play) | Done |
+| Application | `Evaluator` | Done |
+| Interfaces | CLI (`train`, `evaluate`) | Done |
+| Testing | Integration test: full env loop | Done |
+| Testing | Coverage gate ≥80% | Done |
 
 ---
 
-## Planned: Self-Play Training Loop
-
-When complete, training will follow this flow:
+## Self-Play Training Loop
 
 ```
 CLI (train.py)
@@ -211,16 +219,6 @@ CLI (train.py)
           EliminationService / RewardCalculator applied each step
           MetricsTracker.update() → EloRatingSystem.update() → ILogger.log()
           SnapshotPool.save() every N steps
-```
-
-Training command (once implemented):
-```bash
-python -m battle_royale.train --config config/experiments/4v4_baseline.yaml
-```
-
-Evaluation command:
-```bash
-python -m battle_royale.evaluate --checkpoint runs/checkpoint_100k --num-agents 6
 ```
 
 ---

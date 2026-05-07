@@ -34,6 +34,14 @@ dev = [
 
 [tool.poetry]
 package-mode = false
+packages = [{include = "battle_royale", from = "src"}]
+
+[tool.coverage.run]
+source = ["src/battle_royale"]
+omit = ["*/interfaces/cli/*"]
+
+[tool.coverage.report]
+fail_under = 80
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
