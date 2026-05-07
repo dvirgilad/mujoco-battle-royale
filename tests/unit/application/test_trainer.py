@@ -56,9 +56,11 @@ def test_trainer_can_be_constructed(
 
 
 @patch("battle_royale.application.training.trainer.PPO")
+@patch("battle_royale.application.training.trainer.concat_vec_envs_v1")
 @patch("battle_royale.application.training.trainer.pettingzoo_env_to_vec_env_v1")
 def test_trainer_run_creates_ppo_model(
     mock_supersuit,
+    mock_concat,
     mock_ppo,
     mock_env,
     mock_logger,
@@ -68,6 +70,7 @@ def test_trainer_run_creates_ppo_model(
 ):
     mock_vec_env = MagicMock()
     mock_supersuit.return_value = mock_vec_env
+    mock_concat.return_value = mock_vec_env
     mock_model_instance = MagicMock()
     mock_ppo.return_value = mock_model_instance
 
@@ -82,12 +85,20 @@ def test_trainer_run_creates_ppo_model(
 
     mock_ppo.assert_called_once()
     mock_model_instance.learn.assert_called_once()
+    mock_concat.assert_called_once_with(
+        mock_vec_env,
+        num_vec_envs=1,
+        num_cpus=0,
+        base_class="stable_baselines3",
+    )
 
 
 @patch("battle_royale.application.training.trainer.PPO")
+@patch("battle_royale.application.training.trainer.concat_vec_envs_v1")
 @patch("battle_royale.application.training.trainer.pettingzoo_env_to_vec_env_v1")
 def test_trainer_run_calls_supersuit_wrapper(
     mock_supersuit,
+    mock_concat,
     mock_ppo,
     mock_env,
     mock_logger,
@@ -97,6 +108,7 @@ def test_trainer_run_calls_supersuit_wrapper(
 ):
     mock_vec_env = MagicMock()
     mock_supersuit.return_value = mock_vec_env
+    mock_concat.return_value = mock_vec_env
     mock_model_instance = MagicMock()
     mock_ppo.return_value = mock_model_instance
 
@@ -109,3 +121,9 @@ def test_trainer_run_calls_supersuit_wrapper(
     )
     trainer.run()
     mock_supersuit.assert_called_once_with(mock_env)
+    mock_concat.assert_called_once_with(
+        mock_vec_env,
+        num_vec_envs=1,
+        num_cpus=0,
+        base_class="stable_baselines3",
+    )

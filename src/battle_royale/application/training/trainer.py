@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from stable_baselines3 import PPO
-from supersuit import pettingzoo_env_to_vec_env_v1
+from supersuit import concat_vec_envs_v1, pettingzoo_env_to_vec_env_v1
 
 from battle_royale.application.metrics.tracker import MetricsTracker
 from battle_royale.application.training.snapshot_pool import SnapshotPool
@@ -26,6 +26,12 @@ class Trainer:
 
     def run(self) -> None:
         vec_env = pettingzoo_env_to_vec_env_v1(self._env)
+        vec_env = concat_vec_envs_v1(
+            vec_env,
+            num_vec_envs=1,
+            num_cpus=0,
+            base_class="stable_baselines3",
+        )
 
         model = PPO(
             policy="MlpPolicy",
