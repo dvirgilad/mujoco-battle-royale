@@ -1,4 +1,9 @@
-from src.battle_royale.infrastructure.physics import load_data, load_model, render
+import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+
+from battle_royale.infrastructure.physics import load_data, load_model, render
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 Usage:
     python -m battle_royale.interfaces.cli.evaluate --checkpoint runs/checkpoint_100k --num-agents 6
 """
+
 from __future__ import annotations
 
 import argparse
