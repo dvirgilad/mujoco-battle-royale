@@ -29,11 +29,13 @@ class Evaluator:
 
     def evaluate(self, model, num_agents: int, num_episodes: int) -> dict[str, float]:
         env = self._env_factory(num_agents)
-        opponent = self._load_opponent(model)
         eval_wins = 0
         episode_lengths: list[int] = []
 
         for ep_idx in range(num_episodes):
+            # Resample the opponent each episode so win-rate reflects the whole
+            # pool rather than a single snapshot.
+            opponent = self._load_opponent(model)
             eval_agent = f"agent_{ep_idx % num_agents}"
             observations, _ = env.reset()
             done = False

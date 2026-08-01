@@ -11,17 +11,30 @@ class SnapshotPool:
 
     def save(self, model, step: int) -> None:
         filename = f"snapshot_{step:06d}"
-        path = self._save_dir / filename
-        model.save(str(path))
-        # Ensure file exists (handles mock case in tests)
-        if not path.exists():
-            path.touch()
-        self._paths.append(path)
+        base = self._save_dir / filename
+        model.save(str(base))
+        # SB3 writes a .zip; prefer that concrete file so PPO.load can reload it.
+        zip_path = base.with_suffix(".zip")
+        saved = zip_path if zip_path.exists() else base
+        # Ensure a file exists (handles mock case in tests where save() is a no-op)
+        if not saved.exists():
+            saved.touch()
+        self._paths.append(saved)
         if len(self._paths) > self._max_size:
             oldest = self._paths.pop(0)
-            # Remove all files matching this snapshot (SB3 saves .zip)
-            for f in self._save_dir.glob(f"{oldest.name}*"):
+            # Remove all files sharing this snapshot's stem (SB3 saves .zip)
+            for f in self._save_dir.glob(f"{oldest.stem}*"):
                 f.unlink(missing_ok=True)
+
+    def discover(self) -> int:
+        """Populate the pool from snapshot files already on disk.
+
+        Used at evaluation time to load an existing run's opponent pool.
+        Returns the number of snapshots found.
+        """
+        found = sorted(self._save_dir.glob("snapshot_*.zip"))
+        self._paths = list(found)
+        return len(self._paths)
 
     def sample_path(self) -> Path | None:
         if not self._paths:

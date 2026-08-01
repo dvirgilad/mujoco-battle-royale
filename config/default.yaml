@@ -3,6 +3,11 @@ arena:
   radius: 3.0
   # height of the arena walls
   wall_height: 0.5
+  # Battle-royale "storm": boundary shrinks to radius*min_radius_frac over
+  # shrink_steps env steps, forcing matches to resolve (no stalemate draws) and
+  # turning positioning/survival skill into decisive wins.
+  min_radius_frac: 0.15
+  shrink_steps: 300
 training:
   # number of agents per episode
   num_agents: 4
@@ -10,10 +15,19 @@ training:
   total_steps: 1000000
   # save a policy snapshot every N steps
   snapshot_interval: 10000
-  # maximum force magnitude an agent can apply
-  max_force: 10.0
-  # number of past snapshots kept in the opponent pool
-  snapshot_pool_size: 20
+  # Maximum motor force an agent can apply. Terminal speed ~= max_force/damping,
+  # so this sets how fast agents traverse the arena. At 10 it took ~350 steps
+  # just to cross to an opponent, leaving no time to push it out within the
+  # episode cap (winning was physically impossible). 30 gives ~3.7 m/s so an
+  # agent can reach AND shove an opponent to the edge in time.
+  max_force: 30.0
+  # Number of past snapshots kept in the opponent pool. Set to span the whole
+  # run (total_steps / snapshot_interval = 100) so opponents are sampled
+  # uniformly across training history (weak early -> strong late), i.e.
+  # fictitious / delta-uniform self-play. This stabilises training and makes
+  # "win-rate vs pool" measure genuine dominance over past selves rather than a
+  # near-equal match against recent-only snapshots.
+  snapshot_pool_size: 100
 ppo:
   # learning rate for the optimizer
   lr: 0.0003

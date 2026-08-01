@@ -13,6 +13,51 @@ class MetricsTracker:
         self._win_history: deque[str] = deque(maxlen=_ROLLING_WINDOW)
         self._total_episode_length: int = 0
         self.episode_count: int = 0
+        # Self-play (learner vs. snapshot pool) tracking.
+        self._sp_wins: deque[float] = deque(maxlen=_ROLLING_WINDOW)
+        self.learner_rating: float = self._elo.initial_rating
+        self.pool_rating: float = self._elo.initial_rating
+
+    def record_match(
+        self,
+        won: bool,
+        episode_length: int,
+        eliminations: int,
+        step: int,
+    ) -> None:
+        """Record one self-play match of the learner against a pooled opponent.
+
+        Updates a rolling win rate and a two-player Elo (learner vs. the pool
+        treated as a single opponent), then logs both.
+        """
+        self._sp_wins.append(1.0 if won else 0.0)
+        self._total_episode_length += episode_length
+        self.episode_count += 1
+
+        if won:
+            self.learner_rating, self.pool_rating = self._elo.update(
+                self.learner_rating, self.pool_rating
+            )
+        else:
+            self.pool_rating, self.learner_rating = self._elo.update(
+                self.pool_rating, self.learner_rating
+            )
+
+        self._logger.log(
+            {
+                "selfplay/win_rate": self.selfplay_win_rate(),
+                "selfplay/elo": self.learner_rating,
+                "selfplay/episode_length": float(episode_length),
+                "selfplay/eliminations": float(eliminations),
+                "selfplay/episode_count": float(self.episode_count),
+            },
+            step,
+        )
+
+    def selfplay_win_rate(self) -> float:
+        if not self._sp_wins:
+            return 0.0
+        return sum(self._sp_wins) / len(self._sp_wins)
 
     def record_episode(
         self,

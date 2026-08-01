@@ -8,21 +8,50 @@ from battle_royale.infrastructure.config.yaml_loader import Config
 
 
 class MuJoCoEnvironment:
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, randomize_rotation: bool = True) -> None:
         self._config = config
+        self._randomize_rotation = randomize_rotation
+        self._rng = np.random.default_rng()
         self._model: mujoco.MjModel | None = None
         self._data: mujoco.MjData | None = None
         self._num_agents: int = 0
         self._alive: dict[str, bool] = {}
         self._arena: Arena = Arena(radius=config.arena.radius)
+        self._env_step: int = 0
+
+    def _current_radius(self) -> float:
+        """Boundary radius at the current step (shrinks if configured)."""
+        full = self._config.arena.radius
+        shrink_steps = self._config.arena.shrink_steps
+        frac = self._config.arena.min_radius_frac
+        delay = self._config.arena.shrink_delay
+        if shrink_steps <= 0 or frac >= 1.0:
+            return full
+        progress = min(max(self._env_step - delay, 0) / shrink_steps, 1.0)
+        return full * (1.0 - (1.0 - frac) * progress)
+
+    @property
+    def current_radius(self) -> float:
+        return self._arena.radius
 
     def reset(self, num_agents: int) -> dict[str, Agent]:
         self._num_agents = num_agents
+        self._env_step = 0
         self._arena = Arena(radius=self._config.arena.radius)
+        # Random whole-arena rotation each episode so the policy cannot overfit
+        # to fixed per-slot spawn positions (see XMLBuilder.build). Disable for
+        # deterministic rendering/tests.
+        rotation = (
+            float(self._rng.uniform(0.0, 2.0 * np.pi))
+            if self._randomize_rotation
+            else 0.0
+        )
         xml = XMLBuilder.build(
             num_agents=num_agents,
             arena_radius=self._config.arena.radius,
             max_force=self._config.training.max_force,
+            rotation=rotation,
+            damping=self._config.arena.damping,
         )
         self._model = mujoco.MjModel.from_xml_string(xml)
         self._data = mujoco.MjData(self._model)
@@ -50,6 +79,9 @@ class MuJoCoEnvironment:
                 self._data.ctrl[2 * i + 1] = float(np.clip(action[1], -1.0, 1.0))
 
         mujoco.mj_step(self._model, self._data)
+        self._env_step += 1
+        # Advance the (possibly shrinking) boundary before elimination checks.
+        self._arena = Arena(radius=self._current_radius())
 
         curr_agents_raw = self._extract_agents_raw()
 
@@ -78,7 +110,9 @@ class MuJoCoEnvironment:
         from battle_royale.domain.services.reward import RewardCalculator
 
         rewards = {
-            aid: RewardCalculator.compute(prev_agents, curr_agents, aid)
+            aid: RewardCalculator.compute(
+                prev_agents, curr_agents, aid, arena_radius=self._arena.radius
+            )
             for aid in curr_agents
         }
         terminations = {aid: not agent.alive for aid, agent in curr_agents.items()}
@@ -88,6 +122,14 @@ class MuJoCoEnvironment:
 
     def get_agents(self) -> list[Agent]:
         return list(self._extract_agents().values())
+
+    @property
+    def model(self) -> "mujoco.MjModel | None":
+        return self._model
+
+    @property
+    def data(self) -> "mujoco.MjData | None":
+        return self._data
 
     def _body_id(self, i: int) -> int:
         return mujoco.mj_name2id(self._model, mujoco.mjtObj.mjOBJ_BODY, f"agent_{i}")

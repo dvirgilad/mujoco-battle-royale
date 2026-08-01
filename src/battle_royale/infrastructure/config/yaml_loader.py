@@ -9,6 +9,21 @@ import yaml
 class ArenaConfig:
     radius: float = 3.0
     wall_height: float = 0.5
+    # Battle-royale "storm": the arena boundary holds full size for
+    # ``shrink_delay`` steps (a grace / fighting phase), then shrinks from
+    # ``radius`` to ``radius * min_radius_frac`` linearly over ``shrink_steps``
+    # env steps. The grace period gives a stable arena in which pushing -- not
+    # the closing boundary -- is the primary way to eliminate opponents; the
+    # later shrink then breaks any stalemate. Defaults (frac 1.0, steps 0) mean
+    # no shrink.
+    min_radius_frac: float = 1.0
+    shrink_steps: int = 0
+    shrink_delay: int = 0
+    # Joint velocity damping. High (~8) makes agents "sticky" -- they stop
+    # instantly, so a shove barely moves the opponent. Lower (~3-4) lets a shove
+    # send the opponent sliding toward the edge (visible sumo pushing), at the
+    # cost of trickier self-control.
+    damping: float = 8.0
 
 
 @dataclass
@@ -18,6 +33,7 @@ class TrainingConfig:
     snapshot_interval: int = 10_000
     max_force: float = 10.0
     snapshot_pool_size: int = 20
+    episode_max_steps: int = 400
 
 
 @dataclass

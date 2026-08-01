@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from stable_baselines3 import PPO
-from supersuit import concat_vec_envs_v1, pettingzoo_env_to_vec_env_v1
+from stable_baselines3.common.vec_env import DummyVecEnv
 
 from battle_royale.application.metrics.tracker import MetricsTracker
 from battle_royale.application.training.snapshot_pool import SnapshotPool
@@ -10,6 +10,14 @@ from battle_royale.infrastructure.config.yaml_loader import Config
 
 
 class Trainer:
+    """Self-play PPO trainer.
+
+    The learner is trained as a single-agent policy inside ``SelfPlayEnv``; its
+    opponents are frozen snapshots sampled from ``snapshot_pool``. A callback
+    saves new snapshots (feeding the opponent pool) and records each match
+    outcome into ``tracker`` for win-rate / Elo logging.
+    """
+
     def __init__(
         self,
         env,
@@ -24,14 +32,8 @@ class Trainer:
         self._tracker = tracker
         self._config = config
 
-    def run(self) -> None:
-        vec_env = pettingzoo_env_to_vec_env_v1(self._env)
-        vec_env = concat_vec_envs_v1(
-            vec_env,
-            num_vec_envs=1,
-            num_cpus=0,
-            base_class="stable_baselines3",
-        )
+    def run(self) -> PPO:
+        vec_env = DummyVecEnv([lambda: self._env])
 
         model = PPO(
             policy="MlpPolicy",
@@ -46,22 +48,54 @@ class Trainer:
 
         model.learn(
             total_timesteps=self._config.training.total_steps,
-            callback=self._make_callback(model),
+            callback=self._make_callback(),
         )
 
-    def _make_callback(self, model):
+        # Persist the final policy as the newest pool member.
+        self._snapshot_pool.save(model, step=self._config.training.total_steps)
+        return model
+
+    # Curriculum for the fraction of episodes played against passive / random
+    # opponents. A pure-random WARMUP teaches the learner to *hunt* and eject
+    # passive targets (self-play alone never requires this -> a defensive policy
+    # that loses to a random baseline). After the warmup the random fraction
+    # decays so training becomes mostly genuine self-play against the pool
+    # (which is what produces decisive ~1/N outcomes among equal agents), while
+    # keeping a residual random fraction so the hunting skill is not forgotten.
+    _CURRICULUM_WARMUP_FRAC = 0.3  # first 30% of steps: 100% random opponents
+    _CURRICULUM_START_PROB = 1.0
+    _CURRICULUM_END_PROB = 0.35
+
+    def _make_callback(self):
         from stable_baselines3.common.callbacks import BaseCallback
 
         config = self._config
         pool = self._snapshot_pool
+        tracker = self._tracker
+        env = self._env
+        start_p = self._CURRICULUM_START_PROB
+        end_p = self._CURRICULUM_END_PROB
+        warmup = self._CURRICULUM_WARMUP_FRAC
 
-        class SnapshotCallback(BaseCallback):
-            def __init__(self):
-                super().__init__()
-
+        class SelfPlayCallback(BaseCallback):
             def _on_step(self) -> bool:
+                frac = min(self.num_timesteps / max(config.training.total_steps, 1), 1.0)
+                if frac < warmup:
+                    env._random_opponent_prob = start_p
+                else:
+                    decay = (frac - warmup) / max(1.0 - warmup, 1e-9)
+                    env._random_opponent_prob = start_p + (end_p - start_p) * decay
+                for info in self.locals.get("infos", []):
+                    result = info.get("match_result")
+                    if result is not None:
+                        tracker.record_match(
+                            won=result["win"],
+                            episode_length=result["length"],
+                            eliminations=result["eliminations"],
+                            step=self.num_timesteps,
+                        )
                 if self.n_calls % config.training.snapshot_interval == 0:
                     pool.save(self.model, step=self.num_timesteps)
                 return True
 
-        return SnapshotCallback()
+        return SelfPlayCallback()

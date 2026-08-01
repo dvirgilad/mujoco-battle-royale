@@ -57,3 +57,30 @@ def test_mean_episode_length_tracked(tracker):
         winner_id="agent_1", episode_length=200, eliminations=1, step=1
     )
     assert tracker.mean_episode_length() == pytest.approx(150.0, abs=0.1)
+
+
+def test_record_match_updates_win_rate(tracker):
+    for i in range(4):
+        tracker.record_match(won=True, episode_length=50, eliminations=1, step=i)
+    tracker.record_match(won=False, episode_length=50, eliminations=0, step=4)
+    assert tracker.selfplay_win_rate() == pytest.approx(0.8, abs=0.01)
+
+
+def test_record_match_winner_gains_elo(tracker):
+    start = tracker.learner_rating
+    tracker.record_match(won=True, episode_length=50, eliminations=2, step=0)
+    assert tracker.learner_rating > start
+    assert tracker.pool_rating < start
+
+
+def test_record_match_loser_loses_elo(tracker):
+    start = tracker.learner_rating
+    tracker.record_match(won=False, episode_length=50, eliminations=0, step=0)
+    assert tracker.learner_rating < start
+
+
+def test_record_match_logs_selfplay_metrics(tracker, logger):
+    tracker.record_match(won=True, episode_length=77, eliminations=2, step=9)
+    metrics = logger.log.call_args[0][0]
+    assert "selfplay/win_rate" in metrics
+    assert "selfplay/elo" in metrics

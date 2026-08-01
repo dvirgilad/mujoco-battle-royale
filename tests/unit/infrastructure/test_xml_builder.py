@@ -32,11 +32,19 @@ def test_xml_builder_creates_correct_number_of_agents():
         assert len(agent_bodies) == n, f"Expected {n} agents, got {len(agent_bodies)}"
 
 
-def test_xml_builder_agent_cylinders():
+def test_xml_builder_agent_collision_cylinder_per_agent():
+    # Each agent body has exactly one collision cylinder (the physics/mass shape,
+    # drawn invisibly with alpha 0); the humanoid look is added with visual-only
+    # capsule/sphere geoms.
     xml_str = XMLBuilder.build(num_agents=4, arena_radius=3.0, max_force=10.0)
     root = parse(xml_str)
-    geoms = root.findall(".//geom[@type='cylinder']")
-    assert len(geoms) == 4
+    for i in range(4):
+        body = root.find(f".//body[@name='agent_{i}']")
+        cylinders = body.findall("geom[@type='cylinder']")
+        assert len(cylinders) == 1
+        # collision shape is invisible (alpha 0) and collides by default
+        assert cylinders[0].get("rgba", "").split()[3] == "0"
+        assert cylinders[0].get("contype") is None
 
 
 def test_xml_builder_agents_have_slide_joints():
@@ -86,16 +94,17 @@ def test_xml_builder_agent_colors_cycle():
     xml_str = XMLBuilder.build(num_agents=4, arena_radius=3.0, max_force=10.0)
     root = parse(xml_str)
     expected_colors = [
-        (1, 0, 0),
-        (0, 0, 1),
-        (0, 1, 0),
-        (1, 1, 0),
+        (0.90, 0.20, 0.20),
+        (0.20, 0.45, 0.90),
+        (0.20, 0.75, 0.35),
+        (0.95, 0.80, 0.20),
     ]
     for i, (r, g, b) in enumerate(expected_colors):
         body = root.find(f".//body[@name='agent_{i}']")
+        # First geom in the body is the collision cylinder, tinted the agent's
+        # colour (drawn invisibly); the visible humanoid geoms share the colour.
         geom = body.find("geom")
-        rgba = geom.get("rgba")
-        parts = rgba.split()
+        parts = geom.get("rgba").split()
         assert abs(float(parts[0]) - r) < 1e-3
         assert abs(float(parts[1]) - g) < 1e-3
         assert abs(float(parts[2]) - b) < 1e-3
