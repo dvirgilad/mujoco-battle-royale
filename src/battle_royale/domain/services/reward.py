@@ -28,7 +28,7 @@ _WIN_BONUS = 10.0
 # distance-from-centre) gives a smooth gradient toward the real objective while
 # leaving the optimal policy unchanged. Only applies to opponents alive both
 # before and after the step, so it never double-counts an elimination.
-_PUSH_COEF = 1.0
+_PUSH_COEF = 2.0
 # Dense shaping: reward per unit the agent closes the gap to its nearest
 # opponent. Pure self-play produces a defensive policy that never learns to
 # *hunt* -- opponents come to it -- so it fails to eject passive targets. This

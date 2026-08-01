@@ -62,20 +62,20 @@ def test_win_bonus_when_last_survivor():
 
 def test_push_shaping_rewards_driving_opponent_outward():
     # Opponent moves 1.0 -> 1.5 outward with the learner stationary at centre:
-    # push +0.5, approach -0.4*(1.5-1.0)=-0.2 (gap grew), net idle -0.002.
+    # push 2.0*0.5=+1.0, approach -0.4*(1.5-1.0)=-0.2 (gap grew), net idle -0.002.
     prev = {"a0": make_agent_at("a0", 0.0), "a1": make_agent_at("a1", 1.0)}
     curr = {"a0": make_agent_at("a0", 0.0), "a1": make_agent_at("a1", 1.5)}
     reward = RewardCalculator.compute(prev, curr, "a0")
-    assert pytest.approx(reward, abs=1e-6) == 0.5 - 0.2 - 0.002
+    assert pytest.approx(reward, abs=1e-6) == 1.0 - 0.2 - 0.002
 
 
 def test_push_shaping_penalizes_opponent_moving_inward():
-    # Opponent retreats 1.5 -> 1.0: push -0.5, approach +0.2 (gap shrank),
-    # net idle -0.002.
+    # Opponent retreats 1.5 -> 1.0: push 2.0*-0.5=-1.0, approach +0.2 (gap
+    # shrank), net idle -0.002.
     prev = {"a0": make_agent_at("a0", 0.0), "a1": make_agent_at("a1", 1.5)}
     curr = {"a0": make_agent_at("a0", 0.0), "a1": make_agent_at("a1", 1.0)}
     reward = RewardCalculator.compute(prev, curr, "a0")
-    assert pytest.approx(reward, abs=1e-6) == -0.5 + 0.2 - 0.002
+    assert pytest.approx(reward, abs=1e-6) == -1.0 + 0.2 - 0.002
 
 
 def test_approach_shaping_rewards_closing_on_opponent():
