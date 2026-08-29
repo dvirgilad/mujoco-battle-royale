@@ -18,6 +18,10 @@ class MuJoCoEnvironment:
         self._alive: dict[str, bool] = {}
         self._arena: Arena = Arena(radius=config.arena.radius)
         self._env_step: int = 0
+        # Multiplier on the aggression (push + approach) shaping, set by the
+        # training callback to anneal an early aggression boost. 1.0 = baseline
+        # (used at eval and by any caller that never touches it).
+        self._aggression_scale: float = 1.0
 
     def _current_radius(self) -> float:
         """Boundary radius at the current step (shrinks if configured)."""
@@ -52,6 +56,9 @@ class MuJoCoEnvironment:
             max_force=self._config.training.max_force,
             rotation=rotation,
             damping=self._config.arena.damping,
+            agent_density=self._config.arena.agent_density,
+            spawn_jitter=self._config.arena.spawn_jitter,
+            rng=self._rng,
         )
         self._model = mujoco.MjModel.from_xml_string(xml)
         self._data = mujoco.MjData(self._model)
@@ -111,7 +118,11 @@ class MuJoCoEnvironment:
 
         rewards = {
             aid: RewardCalculator.compute(
-                prev_agents, curr_agents, aid, arena_radius=self._arena.radius
+                prev_agents,
+                curr_agents,
+                aid,
+                arena_radius=self._arena.radius,
+                aggression_scale=self._aggression_scale,
             )
             for aid in curr_agents
         }

@@ -52,6 +52,9 @@ class XMLBuilder:
         max_force: float,
         rotation: float = 0.0,
         damping: float = _JOINT_DAMPING,
+        agent_density: float = 1000.0,
+        spawn_jitter: float = 0.0,
+        rng=None,
     ) -> str:
         # ``rotation`` offsets every spawn angle by the same amount. Randomising
         # it per episode decorrelates each slot from a fixed absolute position,
@@ -65,6 +68,15 @@ class XMLBuilder:
 
         for i in range(num_agents):
             angle = (i * 2 * math.pi) / num_agents + rotation
+            # Per-agent ANGULAR spawn jitter breaks the exact-equidistance of the
+            # n-gon (which the distance-sorted observation otherwise tie-breaks by
+            # index, biasing certain slots) and stops any slot having a fixed
+            # geometric role. Angular only, on purpose: radial jitter spawns agents
+            # near the edge and teaches edge-caution that suppresses proactive
+            # hunting (measured: it collapsed dominance-vs-random). Applied
+            # per-episode from the env RNG so it is decorrelated across episodes.
+            if spawn_jitter > 0.0 and rng is not None:
+                angle += float(rng.uniform(-spawn_jitter, spawn_jitter))
             x = spawn_r * math.cos(angle)
             y = spawn_r * math.sin(angle)
             r, g, b = _AGENT_COLORS[i % len(_AGENT_COLORS)]
@@ -74,7 +86,7 @@ class XMLBuilder:
     <body name="agent_{i}" pos="{x:.6f} {y:.6f} {_CYLINDER_HALF_HEIGHT}">
       <joint name="agent_{i}_x" type="slide" axis="1 0 0" limited="false" damping="{damping}"/>
       <joint name="agent_{i}_y" type="slide" axis="0 1 0" limited="false" damping="{damping}"/>
-      <geom type="cylinder" size="{_CYLINDER_RADIUS} {_CYLINDER_HALF_HEIGHT}" rgba="{r} {g} {b} 0"/>{_humanoid_geoms(r, g, b)}
+      <geom type="cylinder" size="{_CYLINDER_RADIUS} {_CYLINDER_HALF_HEIGHT}" density="{agent_density}" rgba="{r} {g} {b} 0"/>{_humanoid_geoms(r, g, b)}
     </body>"""
             motors_xml += f"""
     <motor name="agent_{i}_motor_x" joint="agent_{i}_x" gear="{max_force}" ctrlrange="-1 1"/>

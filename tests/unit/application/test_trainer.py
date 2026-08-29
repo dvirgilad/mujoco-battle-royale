@@ -118,6 +118,40 @@ def test_callback_records_match_and_saves_snapshot(
     mock_snapshot_pool.save.assert_called_once_with(callback.model, step=50)
 
 
+def test_random_opponent_prob_decays_warmup_to_residual():
+    # 100% random warmup, then a linear decay to the residual end_prob.
+    p = Trainer._random_opponent_prob
+    assert p(0.0) == pytest.approx(Trainer._CURRICULUM_START_PROB)
+    assert p(0.1) == pytest.approx(Trainer._CURRICULUM_START_PROB)  # in warmup
+    assert p(1.0) == pytest.approx(Trainer._CURRICULUM_END_PROB)  # fully decayed
+    # Monotonic non-increasing after the warmup.
+    assert p(0.5) >= p(0.9) >= p(1.0)
+
+
+def test_aggression_scale_off_without_curriculum():
+    # No agent-count curriculum (start_n=0) => always baseline 1.0.
+    a = Trainer._aggression_scale
+    assert a(0.0, 0, 4) == pytest.approx(1.0)
+    assert a(0.5, 0, 4) == pytest.approx(1.0)
+    assert a(1.0, 0, 4) == pytest.approx(1.0)
+
+
+def test_aggression_scale_boosts_through_melee_then_anneals():
+    # With the curriculum active: 1.0 before the ramp, rises to the max across
+    # the ramp, holds, then anneals back to 1.0 by the end of training.
+    a = Trainer._aggression_scale
+    assert a(Trainer._AGENT_RAMP_START - 1e-6, 2, 4) == pytest.approx(1.0)  # pre-ramp
+    # Fully ramped (>= _AGENT_RAMP_END, still within the hold window) -> max.
+    assert a(Trainer._AGGR_BOOST_HOLD_END - 1e-6, 2, 4) == pytest.approx(
+        Trainer._AGGR_BOOST_MAX
+    )
+    # Mid-ramp is strictly between baseline and max.
+    mid = a((Trainer._AGENT_RAMP_START + Trainer._AGENT_RAMP_END) / 2, 2, 4)
+    assert 1.0 < mid < Trainer._AGGR_BOOST_MAX
+    # Annealed back to baseline at the end.
+    assert a(1.0, 2, 4) == pytest.approx(1.0)
+
+
 def test_callback_skips_snapshot_off_interval(
     mock_env, mock_logger, mock_snapshot_pool, mock_tracker, config
 ):

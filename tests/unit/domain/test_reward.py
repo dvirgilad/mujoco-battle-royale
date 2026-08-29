@@ -69,6 +69,25 @@ def test_push_shaping_rewards_driving_opponent_outward():
     assert pytest.approx(reward, abs=1e-6) == 1.0 - 0.2 - 0.002
 
 
+def test_aggression_scale_multiplies_push_and_approach_only():
+    # Same push+approach setup as above but with aggression_scale=2.0: the push
+    # (+1.0) and approach (-0.2) shaping double to +2.0 and -0.4; the non-shaping
+    # net idle (-0.002) is unchanged.
+    prev = {"a0": make_agent_at("a0", 0.0), "a1": make_agent_at("a1", 1.0)}
+    curr = {"a0": make_agent_at("a0", 0.0), "a1": make_agent_at("a1", 1.5)}
+    reward = RewardCalculator.compute(prev, curr, "a0", aggression_scale=2.0)
+    assert pytest.approx(reward, abs=1e-6) == 2.0 - 0.4 - 0.002
+
+
+def test_aggression_scale_default_is_one():
+    # Default (unset) scale reproduces the baseline push+approach reward exactly.
+    prev = {"a0": make_agent_at("a0", 0.0), "a1": make_agent_at("a1", 1.0)}
+    curr = {"a0": make_agent_at("a0", 0.0), "a1": make_agent_at("a1", 1.5)}
+    assert RewardCalculator.compute(
+        prev, curr, "a0"
+    ) == RewardCalculator.compute(prev, curr, "a0", aggression_scale=1.0)
+
+
 def test_push_shaping_penalizes_opponent_moving_inward():
     # Opponent retreats 1.5 -> 1.0: push 2.0*-0.5=-1.0, approach +0.2 (gap
     # shrank), net idle -0.002.

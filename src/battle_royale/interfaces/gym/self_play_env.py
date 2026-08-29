@@ -41,6 +41,7 @@ class SelfPlayEnv(gym.Env):
         max_steps: int = 1000,
         randomize_learner: bool = False,
         random_opponent_prob: float = 0.0,
+        draw_penalty: float = 0.0,
     ) -> None:
         super().__init__()
         self._env = env
@@ -61,6 +62,14 @@ class SelfPlayEnv(gym.Env):
         # collapsing when evaluated from other slots. Randomizing forces a
         # rotation-robust policy that matches the sweep protocol.
         self._randomize_learner = randomize_learner
+        # Penalty added to the learner's final reward when the episode TIMES OUT
+        # with the learner alive but other agents also alive (a draw). Makes a
+        # draw hurt like a loss so the cautious "run out the clock" strategy stops
+        # paying -- see TrainingConfig.draw_penalty.
+        self._draw_penalty = draw_penalty
+        # Shuffle tied neighbours in the training observation (order-invariance;
+        # removes the per-slot balance bias without perturbing physics).
+        self._shuffle_neighbors = config.training.shuffle_neighbors
         self._arena = Arena(radius=config.arena.radius)
         self._num_agents = config.training.num_agents
 
@@ -74,6 +83,9 @@ class SelfPlayEnv(gym.Env):
         self._agents: dict[str, Agent] = {}
         self._opponent: Any = None
         self._step_count = 0
+        # Set by the training callback to drive the agent-count curriculum; when
+        # None the configured ``num_agents`` is used (normal / eval behaviour).
+        self._num_agents_override: int | None = None
 
     # -- opponent management ------------------------------------------------
     def _load_opponent(self) -> Any:
@@ -89,7 +101,7 @@ class SelfPlayEnv(gym.Env):
     # -- gym API ------------------------------------------------------------
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
-        self._num_agents = self._config.training.num_agents
+        self._num_agents = self._num_agents_override or self._config.training.num_agents
         self._agents = self._env.reset(num_agents=self._num_agents)
         if self._randomize_learner:
             idx = int(self.np_random.integers(self._num_agents))
@@ -123,6 +135,13 @@ class SelfPlayEnv(gym.Env):
         terminated = (not learner.alive) or won
         truncated = self._step_count >= self._max_steps
 
+        reward = float(rewards[self._learner_id])
+        # Draw = timed out while still alive but not the sole survivor. Charge the
+        # draw penalty so stalling costs as much as losing (OpenAI sumo trick).
+        drew = truncated and not terminated and learner.alive and len(alive_ids) > 1
+        if drew:
+            reward -= self._draw_penalty
+
         info: dict[str, Any] = {}
         if terminated or truncated:
             eliminations = sum(
@@ -139,7 +158,7 @@ class SelfPlayEnv(gym.Env):
 
         return (
             self._obs_for(self._learner_id),
-            float(rewards[self._learner_id]),
+            reward,
             terminated,
             truncated,
             info,
@@ -159,4 +178,7 @@ class SelfPlayEnv(gym.Env):
         # agent perceives the storm closing in.
         radius = getattr(self._env, "current_radius", self._arena.radius)
         arena = Arena(radius=radius)
-        return ObservationBuilder.build(agent, list(self._agents.values()), arena)
+        rng = self.np_random if self._shuffle_neighbors else None
+        return ObservationBuilder.build(
+            agent, list(self._agents.values()), arena, rng=rng
+        )

@@ -24,6 +24,24 @@ class ArenaConfig:
     # send the opponent sliding toward the edge (visible sumo pushing), at the
     # cost of trickier self-control.
     damping: float = 8.0
+    # Collision-cylinder density (kg/m^3). MuJoCo's default 1000 gives a ~7 kg
+    # agent whose passive braking distance from terminal velocity (v * m / damping)
+    # is ~6 m -- far larger than the ~1-2 m arena, so an agent at speed physically
+    # CANNOT stop inside the ring. That single fact drives both self-ejection
+    # (overshooting the edge) and caution (moving slowly is the only way not to
+    # fly out). Lowering density shrinks the braking distance (linear in mass) AND
+    # makes shoves displace opponents more -- helping self-control and pushing at
+    # once. Default 1000 preserves the original physics.
+    agent_density: float = 1000.0
+    # Per-episode spawn perturbation (radians of angular jitter; the same
+    # fraction is reused for radial jitter). Agents otherwise spawn on a perfect
+    # regular n-gon, where the two adjacent neighbours are EXACTLY equidistant --
+    # so the distance-sorted observation breaks that tie by agent index, giving
+    # each slot a fixed clockwise/counter-clockwise "first neighbour" and hence a
+    # per-slot win bias. Jittering the spawns removes the ties (the sort becomes
+    # canonical: nearest first) and stops any slot mapping to a fixed geometric
+    # role, evening out the win distribution. 0 (default) = exact n-gon.
+    spawn_jitter: float = 0.0
 
 
 @dataclass
@@ -34,6 +52,26 @@ class TrainingConfig:
     max_force: float = 10.0
     snapshot_pool_size: int = 20
     episode_max_steps: int = 400
+    # Agent-count curriculum. When > 0, training starts with this many agents
+    # and ramps up to ``num_agents`` (see Trainer). Pushing is learnable at n=2
+    # (no melee risk) but collapses to a cautious no-op if training starts
+    # directly at n=4; ramping lets the policy carry the shove behaviour into the
+    # melee instead of re-discovering caution from scratch. 0 disables the ramp
+    # (train at ``num_agents`` throughout) so default/storm runs are unaffected.
+    curriculum_start_agents: int = 0
+    # Terminal penalty applied to a survivor when the episode TIMES OUT with more
+    # than one agent still alive (a draw). OpenAI's sumo makes a draw as bad as a
+    # loss (both -1000), which destroys the cautious "don't commit, run out the
+    # clock" equilibrium -- if not-winning costs the same as losing, the only good
+    # move is to attack. 0 (default) = draws are free (old behaviour).
+    draw_penalty: float = 0.0
+    # When True, the training observation shuffles the neighbour list before the
+    # nearest-first sort, so genuinely-tied neighbours (e.g. the two adjacent
+    # agents on a symmetric spawn) are ordered randomly rather than by agent
+    # index. This makes the policy order-invariant and removes the per-slot win
+    # bias WITHOUT perturbing the physics (unlike spawn jitter, which collapsed
+    # dominance). Default False so existing runs/evals are unchanged.
+    shuffle_neighbors: bool = False
 
 
 @dataclass
@@ -43,6 +81,12 @@ class PPOConfig:
     batch_size: int = 64
     clip_range: float = 0.2
     n_epochs: int = 10
+    # Discount. A terminal draw/win/lose signal at step T is worth ~gamma**T from
+    # the episode start, so with long episodes a low gamma makes terminal rewards
+    # (like the draw penalty) invisible until the very end. A higher gamma
+    # lengthens the effective horizon so the terminal incentive reaches back into
+    # the mid-game where the caution actually happens.
+    gamma: float = 0.99
 
 
 @dataclass

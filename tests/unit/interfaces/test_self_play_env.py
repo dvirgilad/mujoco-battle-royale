@@ -119,6 +119,46 @@ def test_truncates_at_max_steps(config, empty_pool):
     assert "match_result" in info
 
 
+def test_draw_penalty_charged_on_timeout_with_survivors(config, empty_pool):
+    # Timeout with >1 agent alive (a draw) subtracts draw_penalty from the
+    # learner's reward (base per-step reward from FakeMuJoCoEnv is 0.01).
+    alive_all = {
+        f"agent_{i}": _agent(f"agent_{i}", x=0.1 * i, alive=True) for i in range(4)
+    }
+    env = SelfPlayEnv(
+        env=FakeMuJoCoEnv([alive_all]),
+        config=config,
+        snapshot_pool=empty_pool,
+        draw_penalty=2.0,
+    )
+    env._max_steps = 1
+    env.reset(seed=0)
+    _, reward, terminated, truncated, _ = env.step(np.zeros(2, dtype=np.float32))
+    assert truncated is True and terminated is False
+    assert pytest.approx(reward, abs=1e-6) == 0.01 - 2.0
+
+
+def test_draw_penalty_not_charged_on_win(config, empty_pool):
+    # Winning by timeout-step is a termination, not a draw -> no penalty.
+    final = {
+        "agent_0": _agent("agent_0", x=0.0, alive=True),
+        "agent_1": _agent("agent_1", x=5.0, alive=False),
+        "agent_2": _agent("agent_2", x=5.0, alive=False),
+        "agent_3": _agent("agent_3", x=5.0, alive=False),
+    }
+    env = SelfPlayEnv(
+        env=FakeMuJoCoEnv([final]),
+        config=config,
+        snapshot_pool=empty_pool,
+        draw_penalty=2.0,
+    )
+    env._max_steps = 1
+    env.reset(seed=0)
+    _, reward, terminated, _, info = env.step(np.zeros(2, dtype=np.float32))
+    assert terminated is True and info["match_result"]["win"] is True
+    assert pytest.approx(reward, abs=1e-6) == 0.01  # no draw penalty
+
+
 def test_dead_agents_get_zero_actions_passed_through(config, empty_pool):
     alive_all = {
         f"agent_{i}": _agent(f"agent_{i}", x=0.1 * i, alive=True) for i in range(4)

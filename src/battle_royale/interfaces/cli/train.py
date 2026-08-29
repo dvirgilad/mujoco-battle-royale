@@ -56,6 +56,8 @@ def main(config_path: str, run_dir: str, logger_kind: str = "wandb") -> None:
         # the policy learns to hunt and eject non-cooperative targets (needed to
         # dominate an untrained baseline).
         random_opponent_prob=0.25,
+        # Make a timed-out draw hurt like a loss (OpenAI sumo). 0 = disabled.
+        draw_penalty=config.training.draw_penalty,
     )
 
     logger = _make_logger(logger_kind, run_dir, config_path)

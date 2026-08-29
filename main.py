@@ -34,12 +34,21 @@ def run(
     out_path: str,
     max_steps: int,
     fps: int = 24,
+    num_agents: int | None = None,
+    dominance: bool = False,
+    seed: int | None = None,
 ) -> None:
+    if seed is not None:
+        np.random.seed(seed)
     config = load_config(config_path)
-    num_agents = config.training.num_agents
+    num_agents = num_agents or config.training.num_agents
 
     env = MuJoCoEnvironment(config=config)
     agents = env.reset(num_agents=num_agents)
+
+    # Dominance demo: only agent_0 (drawn red) runs the trained policy; every
+    # other agent acts randomly, so a red win is a genuine 1-vs-(N-1) dominance.
+    learner_id = "agent_0"
 
     policy = None
     if checkpoint:
@@ -70,7 +79,7 @@ def run(
             for aid, agent in agents.items():
                 if not agent.alive:
                     actions[aid] = np.zeros(2, dtype=np.float32)
-                elif policy is not None:
+                elif policy is not None and (not dominance or aid == learner_id):
                     obs = ObservationBuilder.build(agent, list(agents.values()), arena)
                     act, _ = policy.predict(obs, deterministic=True)
                     actions[aid] = act
@@ -95,7 +104,9 @@ def run(
                 break
 
     recorder.save()
+    survivors = [aid for aid, a in agents.items() if a.alive]
     print(f"Saved {recorder.frame_count} frames to {out_path}")
+    print(f"survivors={survivors} learner_won={survivors == [learner_id]}")
 
 
 if __name__ == "__main__":
@@ -107,5 +118,28 @@ if __name__ == "__main__":
     parser.add_argument(
         "--fps", type=int, default=24, help="playback fps (lower = slower / more slow-mo)"
     )
+    parser.add_argument(
+        "--num-agents",
+        type=int,
+        default=None,
+        help="override the agent count from the config (e.g. render n=6 generalization)",
+    )
+    parser.add_argument(
+        "--dominance",
+        action="store_true",
+        help="dominance demo: only agent_0 (red) runs the policy; others act randomly",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=None, help="seed the RNG for a reproducible episode"
+    )
     args = parser.parse_args()
-    run(args.config, args.checkpoint, args.out, args.max_steps, args.fps)
+    run(
+        args.config,
+        args.checkpoint,
+        args.out,
+        args.max_steps,
+        args.fps,
+        args.num_agents,
+        args.dominance,
+        args.seed,
+    )

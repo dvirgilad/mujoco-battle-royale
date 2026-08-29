@@ -54,7 +54,15 @@ class RewardCalculator:
         curr_agents: dict[str, Agent],
         agent_id: str,
         arena_radius: float = 3.0,
+        aggression_scale: float = 1.0,
     ) -> float:
+        # ``aggression_scale`` multiplies the two potential-based aggression
+        # shaping terms (push + approach). Because both are potential-based,
+        # scaling them changes only the *strength of the learning gradient*, not
+        # the optimal policy -- so the trainer can crank it up to force pushing
+        # to form through the melee-risk transition (n=3->4), then anneal it back
+        # to 1.0. Evaluation always uses 1.0 (the true objective). Defaults to 1.0
+        # so non-training callers (eval, tests, storm runs) are unaffected.
         prev_self = prev_agents[agent_id]
         curr_self = curr_agents[agent_id]
 
@@ -92,7 +100,7 @@ class RewardCalculator:
         for aid in shared:
             prev_d = float(np.linalg.norm(prev_agents[aid].position))
             curr_d = float(np.linalg.norm(curr_agents[aid].position))
-            reward += _PUSH_COEF * (curr_d - prev_d)
+            reward += aggression_scale * _PUSH_COEF * (curr_d - prev_d)
 
         # Dense shaping: reward closing the gap to the nearest opponent (hunting).
         if shared:
@@ -104,7 +112,7 @@ class RewardCalculator:
                 float(np.linalg.norm(curr_agents[aid].position - curr_self.position))
                 for aid in shared
             )
-            reward += _APPROACH_COEF * (prev_gap - curr_gap)
+            reward += aggression_scale * _APPROACH_COEF * (prev_gap - curr_gap)
 
         # Sole-survivor win bonus (only meaningful when opponents exist).
         others = [aid for aid in curr_agents if aid != agent_id]
