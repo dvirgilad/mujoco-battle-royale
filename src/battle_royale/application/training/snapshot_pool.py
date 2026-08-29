@@ -10,18 +10,37 @@ class SnapshotPool:
         self._paths: list[Path] = []
 
     def save(self, model, step: int) -> None:
-        filename = f"snapshot_{step:06d}"
-        path = self._save_dir / filename
-        model.save(str(path))
-        # Ensure file exists (handles mock case in tests)
-        if not path.exists():
-            path.touch()
-        self._paths.append(path)
+        # 9-digit zero-pad so filenames sort lexically == numerically (steps run
+        # into the millions). A narrower pad silently breaks two things: eviction
+        # (a stem like "snapshot_100000" prefix-matches "snapshot_1000000") and
+        # discover()'s sorted() ordering.
+        filename = f"snapshot_{step:09d}"
+        base = self._save_dir / filename
+        model.save(str(base))
+        # SB3 writes a .zip; prefer that concrete file so PPO.load can reload it.
+        zip_path = base.with_suffix(".zip")
+        saved = zip_path if zip_path.exists() else base
+        # Ensure a file exists (handles mock case in tests where save() is a no-op)
+        if not saved.exists():
+            saved.touch()
+        self._paths.append(saved)
         if len(self._paths) > self._max_size:
             oldest = self._paths.pop(0)
-            # Remove all files matching this snapshot (SB3 saves .zip)
-            for f in self._save_dir.glob(f"{oldest.name}*"):
+            # Delete this snapshot's exact files only. A glob on the stem would
+            # prefix-match other snapshots whose step shares this one's digits
+            # (e.g. evicting 100000 nuking 1000000), corrupting the live pool.
+            for f in (oldest, oldest.with_suffix(""), oldest.with_suffix(".zip")):
                 f.unlink(missing_ok=True)
+
+    def discover(self) -> int:
+        """Populate the pool from snapshot files already on disk.
+
+        Used at evaluation time to load an existing run's opponent pool.
+        Returns the number of snapshots found.
+        """
+        found = sorted(self._save_dir.glob("snapshot_*.zip"))
+        self._paths = list(found)
+        return len(self._paths)
 
     def sample_path(self) -> Path | None:
         if not self._paths:

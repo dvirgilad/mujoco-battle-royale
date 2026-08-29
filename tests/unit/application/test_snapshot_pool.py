@@ -55,7 +55,22 @@ def test_pool_evicts_oldest_when_full(pool, tmp_path):
     files = list(tmp_path.iterdir())
     assert len(files) == 3
     names = {f.stem for f in files}
-    assert "snapshot_001000" not in names
+    assert "snapshot_000001000" not in names
+
+
+def test_eviction_does_not_delete_digit_prefix_sibling(tmp_path):
+    """Regression: evicting snapshot_100000 must not also delete the still-live
+    snapshot_1000000 (a stem-prefix glob used to nuke it, crashing training once
+    steps passed 1M)."""
+    pool = SnapshotPool(save_dir=str(tmp_path), max_size=2)
+    mock_model = MagicMock()
+    pool.save(mock_model, step=100_000)
+    pool.save(mock_model, step=1_000_000)
+    pool.save(mock_model, step=2_000_000)  # evicts 100_000 only
+    remaining = {f.name for f in tmp_path.iterdir()}
+    assert f"snapshot_{100_000:09d}" not in remaining
+    assert f"snapshot_{1_000_000:09d}" in remaining
+    assert f"snapshot_{2_000_000:09d}" in remaining
 
 
 def test_sample_path_is_random(pool):

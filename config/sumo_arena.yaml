@@ -1,0 +1,42 @@
+# Well-posed sumo arena: curriculum + aggression boost + geometry/time/storm
+# tuned so n=4 CLEARING is physically feasible (the missing ingredient for
+# dominance-vs-random). An eval-time sweep on the curriculum3 policy showed the
+# n=4 dominance "ceiling" (WIN=0.00, all draws) was an ENVIRONMENT artifact, not
+# a policy defect: the same fixed policy jumps to ~0.49 wins / 0 draws under
+# (smaller arena + more steps + a moderate storm), even off-distribution.
+#
+# Levers (each isolated in the sweep):
+#  - radius 1.2 (was 1.6): shorter push-out distance AND less room to overshoot
+#    into self-elimination -> more wins, fewer losses.
+#  - episode_max_steps 800 (was 400): 400 steps (=4s at dt 0.01) is too few to
+#    clear 3 targets sequentially; the mass/damping time-constant alone is ~180
+#    steps. Doubling time converted 55% draws into wins.
+#  - storm ->0.4 with a 200-step grace: the grace window keeps pushing (not the
+#    closing boundary) the only early resolver, preserving the genuine-pushing
+#    claim; the late shrink then breaks stalemates and kills draws.
+# Physics stay the proven sumo settings (low damping so shoves displace).
+arena:
+  radius: 1.2
+  wall_height: 0.5
+  damping: 4.0
+  min_radius_frac: 0.4    # storm closes to 0.4 * 1.2 = 0.48
+  shrink_delay: 200       # grace: pushing-only phase
+  shrink_steps: 400       # linear shrink over steps 200 -> 600
+training:
+  num_agents: 4
+  curriculum_start_agents: 2   # n=2 -> ramp to 4 (+ annealed aggression boost)
+  total_steps: 2000000         # longer episodes -> fewer resets; give more budget
+  snapshot_interval: 10000
+  max_force: 14.0
+  snapshot_pool_size: 100
+  episode_max_steps: 800
+ppo:
+  lr: 0.0003
+  n_steps: 2048
+  batch_size: 64
+  clip_range: 0.2
+  n_epochs: 10
+evaluation:
+  eval_freq: 10000
+  num_episodes: 100
+  generalization_agent_counts: [4, 6, 8]

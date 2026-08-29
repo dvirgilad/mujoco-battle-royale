@@ -1,0 +1,39 @@
+# sumo_light + SPAWN JITTER: even out the per-slot win distribution.
+#
+# sumo_light hit all three targets but the n=4 self-play win share was uneven
+# (~[.20 .19 .32 .29]). Root cause: agents spawn on a perfect regular n-gon, so
+# the two adjacent neighbours are EXACTLY equidistant; the distance-sorted 17-d
+# observation then breaks that tie by agent index, giving each slot a fixed
+# clockwise/counter-clockwise "first neighbour" and a persistent per-slot bias
+# (confirmed real at N=300, present under stochastic actions too). spawn_jitter
+# perturbs each agent's spawn angle/radius per episode, removing the ties (the
+# neighbour sort becomes canonical: nearest first, which is rotation-invariant)
+# and any fixed slot->geometry mapping. Everything else is identical to sumo_light.
+arena:
+  radius: 1.2
+  wall_height: 0.5
+  damping: 4.0
+  agent_density: 150.0
+  spawn_jitter: 0.3        # ~17 deg angular + -/+30% radial, per episode
+  min_radius_frac: 1.0
+  shrink_steps: 0
+training:
+  num_agents: 4
+  curriculum_start_agents: 2
+  total_steps: 1500000
+  snapshot_interval: 10000
+  max_force: 14.0
+  snapshot_pool_size: 100
+  episode_max_steps: 600
+  draw_penalty: 1.0
+ppo:
+  lr: 0.0003
+  n_steps: 2048
+  batch_size: 64
+  clip_range: 0.2
+  n_epochs: 10
+  gamma: 0.997
+evaluation:
+  eval_freq: 10000
+  num_episodes: 100
+  generalization_agent_counts: [4, 6, 8]

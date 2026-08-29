@@ -17,14 +17,12 @@ def test_evaluate_cli_imports():
 @patch("battle_royale.interfaces.cli.train.Trainer")
 @patch("battle_royale.interfaces.cli.train.load_config")
 @patch("battle_royale.interfaces.cli.train.MuJoCoEnvironment")
-@patch("battle_royale.interfaces.cli.train.BattleRoyaleEnv")
-@patch("battle_royale.interfaces.cli.train.WandBLogger")
+@patch("battle_royale.interfaces.cli.train.SelfPlayEnv")
 @patch("battle_royale.interfaces.cli.train.SnapshotPool")
 @patch("battle_royale.interfaces.cli.train.MetricsTracker")
 def test_train_main_wires_dependencies(
     mock_tracker_cls,
     mock_pool_cls,
-    mock_logger_cls,
     mock_env_cls,
     mock_mujoco_cls,
     mock_load_config,
@@ -37,7 +35,8 @@ def test_train_main_wires_dependencies(
 
     from battle_royale.interfaces.cli.train import main
 
-    main(config_path="config/default.yaml", run_dir="/tmp/test_run")
+    # logger_kind="null" avoids importing/instantiating WandBLogger in tests.
+    main(config_path="config/default.yaml", run_dir="/tmp/test_run", logger_kind="null")
 
     mock_load_config.assert_called_once_with("config/default.yaml")
     mock_mujoco_cls.assert_called_once()

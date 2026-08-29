@@ -8,3 +8,16 @@ CLAUDE.md
 docs/superpowers
 
 .coverage
+
+# Training outputs and generated media (large / regenerable)
+runs/
+# stray root-level training logs
+runs_*.log
+*.mp4
+# ...but DO track the small, curated submission demo clips
+!media/*.mp4
+gallery.html
+
+# Stray local-command capture files
+*local-command-caveat*.txt
+__pycache__/
