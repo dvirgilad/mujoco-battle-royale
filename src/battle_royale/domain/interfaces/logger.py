@@ -1,0 +1,6 @@
+from typing import Protocol
+
+
+class ILogger(Protocol):
+    def log(self, metrics: dict[str, float], step: int) -> None: ...
+    def save_artifact(self, path: str, name: str) -> None: ...

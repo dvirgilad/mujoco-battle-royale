@@ -1,0 +1,5 @@
+arena:
+  radius: 3.0
+training:
+  num_agents: 4
+  total_steps: 1000000
