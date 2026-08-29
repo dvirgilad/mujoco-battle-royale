@@ -1,21 +1,30 @@
-# Battle Royale Self-Play — System Design, Math & Physics
+# System Design — logic, physics & the reasoning behind each choice
 
-A complete walkthrough of every component: what it is, the math/physics behind
-it, and *why* it is there. Where a design choice fixes a concrete failure mode,
-that failure is called out — the current system is the fixed point of a long
-chain of "the obvious thing doesn't work because…".
+A component-by-component walkthrough of the final system: **what** each part is,
+the **math/physics** behind it, and **why** it is there. Where a choice fixes a
+concrete failure, that failure is named — the system is the fixed point of a long
+chain of *"the obvious thing doesn't work because…"*.
+
+> This doc describes the **final** system, configured by `config/sumo_light.yaml`.
+> For the full research narrative — every experiment, dead end, and the payoff
+> algebra behind the fixes — see [`METHODOLOGY.md`](METHODOLOGY.md). For run
+> commands see [`RUNBOOK.md`](RUNBOOK.md).
 
 ---
 
 ## 1. The game in one paragraph
 
-`N` agents are pucks on a 2-D circular arena. Each can push itself around with a
-2-D force. An agent is **eliminated** when it leaves the arena boundary. The
-boundary **shrinks** over time (the "storm"), so the arena eventually cannot hold
-everyone and the match resolves to a single survivor. The learning goal is a
-single **self-play** policy (all agents share one network) that (a) forms a
-*balanced* population — N copies each win ≈ `1/N` — and (b) *dominates* an
-untrained/random baseline when it plays 1-vs-(N−1).
+`N` agents (4–8) are pucks on a 2-D circular arena. Each pushes itself around with
+a 2-D force. An agent is **eliminated** when it leaves the arena boundary; the
+last one in wins. All agents share **one** self-play policy. Success is three
+measurable behaviours, all in the hard **melee** regime (n ≥ 4):
+
+1. **Balance** — N identical copies each win ≈ `1/N`.
+2. **Dominance** — 1 trained agent beats N−1 untrained/random agents.
+3. **Active pushing** — agents win by *shoving opponents out*, not by outlasting a
+   shrinking boundary.
+
+The headline policy achieves all three at n = 4 and n = 6 (see §10).
 
 ---
 
@@ -26,89 +35,87 @@ Dependencies point inward; inner layers know nothing of outer ones.
 | Layer | Contents | Examples |
 |---|---|---|
 | **domain** | Pure rules, no I/O | `Agent`, `Arena`, `RewardCalculator`, `ObservationBuilder`, `EliminationService`, `EloRatingSystem` |
-| **application** | Orchestration/use-cases | `Trainer`, `Evaluator`, `SnapshotPool`, `MetricsTracker` |
-| **infrastructure** | External tech | `MuJoCoEnvironment`, `XMLBuilder`, `WandB/console loggers`, `VideoRecorder`, YAML config |
+| **application** | Orchestration / use-cases | `Trainer`, `Evaluator`, `SnapshotPool`, `MetricsTracker` |
+| **infrastructure** | External tech | `MuJoCoEnvironment`, `XMLBuilder`, WandB/console loggers, `VideoRecorder`, YAML config |
 | **interfaces** | Adapters to the outside | `SelfPlayEnv` (Gymnasium), `BattleRoyaleEnv` (PettingZoo), CLIs |
 
-Why: the reward and observation are *pure functions* of game state, so they are
-unit-tested exhaustively and are identical in training, evaluation and rendering.
-Physics (MuJoCo) is an infrastructure detail behind an interface, so the learning
-code never imports MuJoCo directly.
+**Why.** The reward and observation are *pure functions* of game state, so they
+are unit-tested exhaustively and are byte-identical across training, evaluation
+and rendering. Physics (MuJoCo) is an infrastructure detail behind an interface,
+so the learning code never imports MuJoCo directly — swapping the simulator or the
+RL algorithm touches one layer only.
 
 ---
 
 ## 3. Physics
 
 ### 3.1 Bodies and actuation
-Each agent is a MuJoCo body with **two slide joints** (`x`, `y`) — it translates
-in the plane, no rotation, no vertical motion. A cylinder geom (radius
-`r = 0.15 m`, half-height `0.05 m`) is the collision + mass shape. Two motors
-(one per joint) apply force `F = gear · u`, where the control `u ∈ [−1, 1]` is the
-policy's action and `gear = max_force = 30 N`.
+Each agent is a MuJoCo body on **two slide joints** (`x`, `y`) — it translates in
+the plane; no rotation, no vertical motion. A cylinder geom (radius `r = 0.15 m`,
+half-height `0.05 m`) is the collision + mass shape, drawn invisibly; a
+visual-only humanoid (zero mass, no collision) is drawn over it for rendering.
+Two motors apply force `F = gear · u`, control `u ∈ [−1, 1]`, `gear = max_force = 14 N`.
 
-Mass (MuJoCo default density `ρ = 1000 kg/m³`):
+Mass depends on the cylinder **density** `ρ` (exposed as `arena.agent_density`):
 ```
-m = ρ · π r² h = 1000 · π · 0.15² · 0.10 ≈ 7.07 kg
+m = ρ · π r² (2·half_height) = ρ · π · 0.15² · 0.10
+   ρ = 1000 (MuJoCo default) → m ≈ 7.07 kg     (original, heavy)
+   ρ = 150  (sumo_light)     → m ≈ 1.06 kg     (final, light)
 ```
 
-### 3.2 The damping equation (why the arena is not frictionless)
-Per axis, Newton's law with linear joint **damping** `c = 8 N·s/m`:
+### 3.2 The damping equation — bounded speed *and* the braking-distance trap
+Per axis, Newton's law with linear joint **damping** `c = 4 N·s/m`:
 ```
-m · a = F − c · v          (a = dv/dt)
+m · v̇ = F − c · v
 ```
-This is a first-order linear ODE in `v`. Two consequences matter:
+Three quantities follow, and the **third is the load-bearing insight of the whole
+project**:
 
-- **Terminal velocity** (steady state, `a = 0`):
+- **Terminal velocity** `v∞ = F/c = 14/4 = 3.5 m/s` — independent of mass; push
+  forever and you top out here. Damping is what makes the arena *not* frictionless:
+  with `c = 0`, `v` grows unbounded and any bias slides you off the edge — the task
+  is literally unlearnable.
+- **Braking time-constant** `τ = m/c`. Cut thrust and `v(t) = v₀ e^{−t/τ}`.
+- **Braking distance** from terminal velocity, `d_brake = v∞ · τ = F·m / c²`:
   ```
-  v_term = F_max / c = 30 / 8 = 3.75 m/s
+  heavy (m=7.07): d_brake = 14·7.07 / 16 ≈ 6.2 m   (≈5.5 m with reverse thrust)
+  light (m=1.06): d_brake = 14·1.06 / 16 ≈ 0.93 m   (measured 0.96 m)
   ```
-  Velocity is *bounded*. Push at full force forever and you top out at 3.75 m/s.
 
-- **Braking time constant**:
-  ```
-  τ = m / c = 7.07 / 8 ≈ 0.88 s  (≈ 88 sim steps at dt = 0.01 s)
-  ```
-  Release the control and velocity decays like `e^(−t/τ)` — the agent can *stop*.
+**Why this decides everything.** The arena radius is **~1.2 m**. With heavy
+agents `d_brake ≫ R_arena`: an agent that reaches any real speed *physically cannot
+stop inside the ring*. That single inequality forces **both** failure modes we
+chased for a dozen experiments — self-ejection (overshoot the edge and die) and
+caution (never commit to a push) — and **no reward change can defeat it**, because
+it is a hard dynamical constraint. Lowering density to `ρ = 150` makes
+`d_brake < R_arena`; `v∞` is unchanged and lighter opponents are displaced *more*
+per impulse, so pushing gets easier at the same time. This is the change that
+turned a −0.26 dominance ceiling into +0.98. Full derivation: METHODOLOGY §3.1.
 
-**Why this is essential.** With `c = 0` (frictionless, the original model),
-`m·a = F` ⇒ `v` grows without bound and position integrates quadratically. Any
-tiny directional bias in the policy compounds into an uncontrollable slide off
-the edge — the agent literally cannot learn to stay in. Empirically, with `c = 0`
-"winning" degenerated into *being the last to fall off by accident* (a ~`1/N`
-artifact), and a stronger reward simply made agents commit suicide faster.
-Damping converts the task from "impossible to control" to "a controllable sumo".
-
-### 3.3 Force magnitude (why 30 N, not 10 N)
-Traversal time across the arena ≈ `distance / v_term`. At `F = 10 N`,
-`v_term = 1.25 m/s`; a scripted optimal "ram" needed ~350 of the 400 step budget
-just to *reach* an opponent on the far side — no time left to push it out, so
-winning was physically impossible. At `F = 30 N` (`v_term = 3.75 m/s`) a scripted
-ram reaches *and* ejects a passive opponent by ≈ step 236. So the higher force
-makes the objective *achievable within the episode*.
-
-`dt = 0.01 s`; episodes are capped at 400 steps (4 s of simulated time).
+### 3.3 Force magnitude and horizon
+At `F = 14 N`, `v∞ = 3.5 m/s`; an agent can cross the ~2.4 m arena in well under a
+second, leaving most of the episode to fight. `dt = 0.01 s`; episodes are capped at
+`episode_max_steps = 600` (6 s of simulated time).
 
 ---
 
-## 4. The storm (shrinking arena)
+## 4. The arena boundary — storm optional, off by default
 
-The boundary radius at step `t`:
+The boundary radius at step `t` is
 ```
-R(t) = R₀ · ( 1 − (1 − f) · min(t / T, 1) )        for t ≤ T
-R(t) = R₀ · f                                       for t > T
-R₀ = 3.0 (initial),  f = 0.15 (final fraction),  T = 300 steps
+R(t) = R₀ · (1 − (1 − f)·min(t/T, 1)),   f = min_radius_frac,  T = shrink_steps
 ```
-So the radius contracts linearly `3.0 → 0.45 m` over the first 3 seconds, then
-holds. Elimination uses the **current** `R(t)` (see §5), and the observation and
-edge-penalty use it too, so agents perceive and are graded against the closing
-boundary.
+Setting `f = 1` (or `T = 0`) makes `R(t) ≡ R₀` — a **fixed** arena. **The headline
+policy runs with no storm** (`min_radius_frac: 1.0`), on purpose: with no closing
+boundary to eliminate anyone "for free", **pushing an opponent out is the only way
+to win**, so every resolution is a genuine push-out and the *active-pushing* target
+is meaningful rather than a survival timer.
 
-**Why the storm exists.** Two competent, damped agents can simply avoid each
-other forever → the match ends in a *draw* at the step cap, and skill is
-invisible. The storm removes draws by construction: once `R(t)` is smaller than
-the space `N` agents need, someone is forced out. It (a) makes matches *decisive*
-(draw-rate → ~0), (b) turns positioning/survival skill into wins, and (c) is the
-literal "battle-royale" mechanic. Its effect is measured in §10.1.
+The storm is retained as a mechanism because it was instructive: it trivially
+removes draws (once `R(t)` is too small for `N` agents, someone is forced out) and
+was how earlier storm-trained policies reached balance/dominance — but it *replaces*
+pushing rather than causing it, and rewards non-contact wins, the opposite of goal
+(3). See METHODOLOGY §4, run #3.
 
 ---
 
@@ -116,8 +123,8 @@ literal "battle-royale" mechanic. Its effect is measured in §10.1.
 ```
 EliminationService.is_eliminated(agent) ≡  ‖agent.position‖ > R(t)
 ```
-Eliminated agents are frozen (velocity and control zeroed) and excluded from
-future neighbour observations, but remain in the roster so indexing is stable.
+Eliminated agents are frozen (velocity and control zeroed) and dropped from future
+neighbour observations, but stay in the roster so slot indexing is stable.
 
 ---
 
@@ -125,173 +132,148 @@ future neighbour observations, but remain in the roster so indexing is stable.
 
 For the acting agent:
 ```
-[ own_x, own_y,           # absolute position          (2)
-  own_vx, own_vy,         # own velocity               (2)
-  R(t) − ‖pos‖,           # distance to current boundary (1)
+[ own_x, own_y,            # absolute position            (2)
+  own_vx, own_vy,          # own velocity                 (2)
+  R(t) − ‖pos‖,            # distance to current boundary (1)
   for k in 3 nearest living opponents:
-     (nx−x, ny−y),        # relative position          (2 each)
-     (nvx−vx, nvy−vy) ]   # relative velocity          (2 each)
+     (nx−x, ny−y),         # relative position   (2 each)
+     (nvx−vx, nvy−vy) ]    # relative velocity   (2 each)
 = 2 + 2 + 1 + 3·4 = 17
 ```
 
 Design points and *why*:
-- **Neighbours are sorted by distance** and only the nearest 3 are kept →
-  the representation is *permutation-invariant* (order of opponents doesn't
-  matter) and fixed-width for any `N`, which is what lets one network play
-  `N = 2…8`.
-- **Relative** neighbour coordinates → translation-invariant.
-- The only **absolute** quantity is own `(x, y)`. That single choice broke
-  rotational symmetry: because agent 0 always spawned at angle 0, the policy
-  memorised its spawn and one slot won ~80 % of an all-identical match instead of
-  `1/N`. Fixed by **randomising the whole-arena rotation** each episode (§8.4),
-  which decorrelates slot from absolute position and forces a rotation-invariant
-  policy.
+- **Nearest-3, sorted by distance** → fixed-width and *permutation-invariant*, which
+  is exactly what lets one network play any `N = 2…8`.
+- **Relative** neighbour coords → translation-invariant.
+- The only **absolute** quantity is own `(x, y)`. That single choice broke rotational
+  symmetry: because `agent_0` always spawned at angle 0, an early policy memorised its
+  spawn and one slot won ~80 % of an all-identical match instead of `1/N`. Fixed by
+  **randomising the whole-arena rotation** each episode (§8.4).
+- *Residual bias:* on a regular n-gon the two adjacent neighbours are **exactly
+  equidistant**, so the stable sort tie-breaks by agent index, giving each slot a
+  fixed CW/CCW "first neighbour" and a small per-slot win bias. Attempts to remove it
+  (spawn jitter, neighbour-shuffle) collapsed the aggressive behaviour — a documented
+  fragility result, METHODOLOGY §3.7.
 
 ---
 
 ## 7. Reward function — the heart of the system
 
-Computed per step for an agent that was alive last step. Let `d_i = ‖pos_i‖`
-(distance from centre) and `gap = ‖pos_self − pos_nearest_opp‖`.
+Computed per step for an agent that was alive last step. `d_i = ‖pos_i‖` (distance
+from centre), `gap = ‖pos_self − pos_nearest_opp‖`.
 
 ```
-R =  +1.0 · (# opponents that died this step)          # ELIMINATION
-     −1.0                if the agent itself died  → return   # DEATH
-     +0.001 − 0.003      per surviving step (net −0.002)      # SURVIVAL + TIME
-     −1.0 · max(0, d_self − 0.92·R(t))                        # EDGE PENALTY
-     +1.0 · Σ_opp (d_opp,now − d_opp,prev)                    # PUSH shaping
-     +0.4 · (gap_prev − gap_now)                              # APPROACH shaping
-     +10.0               if the agent is the sole survivor    # WIN BONUS
+R =  +1.0 · (# opponents that died this step)                 # ELIMINATION
+     −1.0                if the agent itself died  → return    # DEATH
+     +0.001 − 0.003      per surviving step (net −0.002)       # SURVIVAL + TIME
+     −1.0 · max(0, d_self − 0.92·R(t))                         # EDGE PENALTY
+     + a · 2.0 · Σ_opp (d_opp,now − d_opp,prev)                # PUSH shaping
+     + a · 0.4 · (gap_prev − gap_now)                          # APPROACH shaping
+     +10.0               if the agent is the sole survivor     # WIN BONUS
 ```
-
-Every term exists to fix a specific failure that appeared without it:
+`a = aggression_scale` (annealed; §8.6). On a timed-out **draw** the learner is
+additionally charged `−draw_penalty` (§8.5).
 
 | Term | Value | Fixes |
 |---|---|---|
-| **Elimination** | +1 / opponent | Gives a signal for opponents leaving. |
-| **Death** | −1 | Discourages driving yourself out. |
-| **Survival** | +0.001 | Keeps "alive" strictly better than "dead" each step — an anti-suicide floor. |
-| **Time penalty** | −0.003 (net −0.002/step) | Makes idling mildly unprofitable so passive **turtling** to the cap (≈ −0.8) is worse than acting — *but* still above the death penalty (−1), so it does **not** re-create a suicide incentive. An earlier −0.01 penalty made idling worse than dying and the policy learned to self-eliminate. |
-| **Win bonus** | +10 (sole survivor) | Makes **winning dominate turtling**: turtle-to-cap ≈ −0.8, a win ≈ elims + 10 ≈ +13. Without an explicit terminal win signal the policy either turtles (if survival is large) or suicides (if it's negative). |
-| **Push shaping** | +1 · Δ(opponent radius) | Dense, **potential-based** term (potential `Φ = Σ opponent distance-from-centre`). The win/elim rewards are far too sparse for exploration to ever stumble on a full push-out; this gives a smooth gradient toward ejecting. Potential-based ⇒ it does not change the optimal policy, only the learning speed. |
-| **Approach shaping** | +0.4 · Δ(−gap) | Teaches the agent to **hunt**. Pure self-play opponents come *to* you, so the policy never learns to close on a *passive* target and loses to a random baseline. This rewards closing the gap; because it's ~0 while you stay in contact and shove, it does **not** fight the push term. It was 8× weaker at first (0.05) and never bootstrapped a chase — strengthening it was what finally produced ejections. |
-| **Edge penalty** | −1 · (outer-ring depth) | Dense **self-preservation**. A terminal −1 is too sparse to teach *braking*; the agent kept overshooting its own edge while chasing. Active only beyond `0.92·R(t)` so it deters going *past* the edge without discouraging central play or shoving an opponent out. |
+| **Elimination** | +1 / opponent | a signal for opponents leaving |
+| **Death** | −1 | discourages driving yourself out |
+| **Survival** | +0.001 | "alive" strictly beats "dead" each step — an anti-suicide floor |
+| **Time penalty** | −0.003 (net −0.002/step) | idling to the cap (≈ −1.2) is mildly unprofitable — but still above death (−1), so it does *not* re-create a suicide incentive |
+| **Win bonus** | +10 (sole survivor) | makes **winning dominate turtling**: turtle ≈ −1.2, win ≈ elims + 10 ≈ +13 |
+| **Push shaping** | +2.0 · Δ(opponent radius) | dense, **potential-based** (`Φ = Σ opp distance-from-centre`); the win/elim signal is far too sparse for exploration to stumble on a push-out. Potential-based ⇒ optimal policy unchanged (Ng et al. 1999) |
+| **Approach shaping** | +0.4 · Δ(−gap) | teaches the agent to **hunt** a passive target; pure self-play opponents come *to* you, so without it the policy can't eject a *random* baseline (0 % vs random) |
+| **Edge penalty** | −1 · (outer-ring depth) | dense **self-preservation**: a terminal −1 is too sparse to teach braking; active only beyond `0.92·R(t)` so it deters overshooting without discouraging shoves |
 
-Ordering the design guarantees: **win (≈ +13) ≫ turtle (≈ −0.8) > suicide (−1)**.
-That single inequality is what all the tuning is really about.
+The whole design guarantees one inequality: **win (≈ +13) ≫ turtle (≈ −1.2) > suicide (−1)**.
 
 ---
 
 ## 8. Self-play
 
 ### 8.1 `SelfPlayEnv` — a single-agent view of a multi-agent game
-SB3 (PPO) controls **one** *learner* slot; the other `N−1` slots are driven by a
-frozen opponent policy sampled at episode start. Each episode is therefore one
-clean "learner vs the field" match with a win/loss, which is exactly what makes
-win-rate and Elo measurable and what the generalisation sweep varies (`N`).
+PPO controls **one** *learner* slot; the other `N−1` slots run a frozen opponent
+policy sampled at episode start. Each episode is therefore one clean
+"learner-vs-field" match with a win/loss — exactly what makes win-rate and Elo
+measurable and what the generalisation sweep varies (`N`).
 
-### 8.2 Snapshot pool = fictitious / δ-uniform self-play
-`SnapshotPool` keeps up to 100 past policy snapshots (the whole 1 M-step run at a
-10 k interval) and samples an opponent **uniformly** from them. Training against
-a uniform mix of *all* past selves (weak-early → strong-late), rather than only
-the latest, is δ-uniform self-play (Heinrich & Silver; AlphaStar league). It
-stabilises training (no Red-Queen cycling against a single moving target) and
+### 8.2 Snapshot pool = δ-uniform self-play
+`SnapshotPool` keeps up to 100 past snapshots (the whole 1.5 M-step run at a 10 k
+interval) and samples an opponent **uniformly**. Training against a uniform mix of
+*all* past selves (weak-early → strong-late), not just the latest, is δ-uniform
+self-play (Heinrich & Silver; AlphaStar league): it avoids Red-Queen cycling and
 makes "beating the pool" mean *dominating your own history*.
 
 ### 8.3 Opponent curriculum (learn to *hunt*, then to *compete*)
-The fraction of episodes played against **random** opponents follows a schedule:
-```
-frac < 0.30      : p_random = 1.0            (warm-up: learn to hunt passive targets)
-frac ≥ 0.30      : p_random: 1.0 → 0.35      (decay into mostly self-play)
-```
-Rationale: pure self-play yields a *defensive* policy that can't eject a passive
-random agent (0 % vs random); pure-random training yields a *hunter* that only
-draws against competent copies of itself. The curriculum keeps both skills.
+The fraction of episodes played against **random** opponents warms up at 1.0 and
+decays to ~0.35. Pure self-play yields a *defensive* policy that can't eject a
+passive random (0 % vs random); pure-random yields a *hunter* that only draws
+against competent copies — the curriculum keeps both.
 
 ### 8.4 Rotation randomisation
-Every reset rotates all spawn angles by a random `θ ∈ [0, 2π)`. See §6 — this is
-what makes the balance demonstration (`~1/N`) hold instead of one slot dominating.
+Every reset rotates all spawn angles by a random `θ ∈ [0, 2π)`, decorrelating slot
+from absolute position (§6) — this is what makes the balance demo hold at ≈ `1/N`.
 
-### 8.5 Elo
-`EloRatingSystem` (K = 32) tracks the learner vs the pool as an aggregate rating,
-updated per match by the standard logistic expected-score update
-`R ← R + K·(S − E)`, `E = 1/(1 + 10^((R_opp − R)/400))`. Used as a training-health
-signal (a rising Elo = the learner is beating progressively stronger snapshots).
+### 8.5 Draw = loss
+A timed-out draw (still alive, not the sole survivor) is charged `draw_penalty` so
+stalling costs as much as losing. This destroys the cautious "run out the clock"
+equilibrium — OpenAI's sumo trick (a draw scores −1000, like a loss). Set **equal
+to** the death penalty, not larger, so there is no incentive to self-eliminate.
+Payoff algebra: METHODOLOGY §3.3.
+
+### 8.6 Agent-count curriculum + aggression boost
+Training starts at `curriculum_start_agents = 2` and ramps to `num_agents`, so the
+shove skill forms 1v1 (where committing has ~zero exposure) and is carried into the
+melee. A potential-based **aggression boost** (`a`) is ramped up across the
+transition and annealed back to 1 — scaling a potential leaves the optimum
+unchanged, so it only speeds exploration (METHODOLOGY §3.5).
+
+### 8.7 Elo
+`EloRatingSystem` (K = 32) tracks the learner vs the pool via the standard logistic
+update `R ← R + K·(S − E)` — a training-health signal (rising Elo = beating
+progressively stronger snapshots).
 
 ---
 
 ## 9. PPO training
-Stable-Baselines3 `PPO`, `MlpPolicy`, `lr = 3e-4`, `n_steps = 2048`,
-`batch = 64`, `clip = 0.2`, `n_epochs = 10`, single `DummyVecEnv`. A callback
-(a) records each finished match into `MetricsTracker`, (b) saves a snapshot every
-10 k steps into the pool, and (c) advances the curriculum schedule. ~1 M steps
-≈ 25 min on CPU (~600–700 steps/s).
+Stable-Baselines3 `PPO`, `MlpPolicy` (2×64), `lr = 3e-4`, `n_steps = 2048`,
+`batch = 64`, `clip = 0.2`, `n_epochs = 10`, `gamma = 0.997`, single `DummyVecEnv`.
+The high γ gives the terminal draw penalty an effective reach of `1/(1−γ) ≈ 333`
+steps back into the mid-game where the commit-or-wait decision is made
+(METHODOLOGY §3.4). A callback (a) records each match into `MetricsTracker`,
+(b) snapshots into the pool every 10 k steps, (c) advances both curricula and the
+aggression schedule. ~1.5 M steps ≈ 30–40 min on CPU.
 
 ---
 
-## 10. Results (storm-trained policy, ~930 k steps)
+## 10. Results (headline policy, `sumo_light`, 1.5 M steps)
 
-Training signal: rolling win-rate vs pool ≈ **0.59**, Elo rising through **1500+**,
-**3.0** eliminations/episode, matches resolving in ~180 steps.
+| | n=2 | n=4 | n=6 | n=8 |
+|---|---|---|---|---|
+| **Active pushing** — self-play resolution, no storm (every resolution = a push-out) | 0.88 | **0.91** | 0.79 | 0.78 |
+| **Dominance** — 1 trained vs n−1 random, edge = WIN−LOSS | +1.00 | **+0.98** | +0.85 | +0.56 |
+| **Balance** — per-slot win share (ideal 1/n) | ~0.50 | ~0.25 | ≈ 1/6 | ≈ 1/8 |
 
-### 10.1 Does the storm force engagement? (Yes — it forces *resolution*.)
-Same trained policy in all slots, storm ON vs OFF, over 50 matches each:
+n=8 is 2× the training count (zero-shot): pushing holds (0.78) and the learner is almost
+never eliminated (dominance loss 0.01), but it cannot clear all seven randoms inside the time
+limit, so the edge softens to +0.56.
 
-| | resolution rate | avg eliminations | mean nearest-neighbour gap (early → late) |
-|---|---|---|---|
-| n=4, storm **OFF** | **0.04** | 0.74 / 4 | 2.05 → 0.47 |
-| n=4, storm **ON**  | **0.98** | 3.00 / 4 | 2.06 → 0.65 |
-| n=6, storm **OFF** | **0.00** | 1.48 / 6 | 1.47 → 0.52 |
-| n=6, storm **ON**  | **0.96** | 4.96 / 6 | 1.47 → 0.42 |
-
-Reading: the agents *cluster* either way (early gap ~2 → late gap ~0.5 in both
-cases — the trained policy is inherently aggressive). But **without the storm 96–
-100 % of matches are draws** — they push each other but the arena is too big to
-eject anyone. The storm converts that into **96–98 % decisive** matches and drives
-average eliminations from <1 to nearly the whole field. So the storm's role is to
-force **resolution**, not initial contact.
-
-### 10.2 Demonstration #1 — Balance (N identical copies → ~1/N), 100 matches each
-
-| N | per-slot win-rate | ideal (1/N) | draw rate |
-|---|---|---|---|
-| 4 | 0.21, 0.17, 0.26, 0.33 | 0.25 | 0.03 |
-| 6 | 0.17, 0.14, 0.11, 0.21, 0.18, 0.12 | 0.17 | 0.07 |
-| 8 | 0.08, 0.08, 0.12, 0.12, 0.17, 0.12, 0.14, 0.07 | 0.125 | 0.10 |
-
-Every slot wins ≈ `1/N` with no dominator, and draws stay low — a balanced,
-decisive Nash population at all three counts.
-
-### 10.3 Demonstration #2 — Dominance (1 trained vs N−1 random), 100 matches each
-
-| N | trained WIN | LOSS | edge (win−loss) |
-|---|---|---|---|
-| 2 | 0.51 | 0.49 | +0.02 |
-| 3 | 0.48 | 0.52 | −0.04 |
-| **4 (training scale)** | **0.92** | 0.08 | **+0.84** |
-| 6 | 0.72 | 0.28 | +0.44 |
-| 8 | 0.54 | 0.46 | +0.08 |
-
-Clear dominance at the training scale (`N = 4`: 0.92) that generalises up to
-`N = 6` (0.72). It weakens at `N = 2, 3` (fewer opponents than trained — out of
-distribution) and at `N = 8` (crowded). Training at mixed agent-counts would flatten
-this curve if uniform dominance is wanted.
+Stable across every checkpoint 1.0 M–1.5 M. At n = 4 the policy wins 99 % of matches
+against three untrained opponents; four copies of it resolve 91 % of games by an
+actual push-out. Demo footage: `media/battle_royale_results.mp4` (captioned reel),
+`media/sumo_light_n4.mp4`, `media/sumo_light_n6.mp4`.
 
 ---
 
 ## 11. Why the classic success target was replaced
 
-The README originally asked for "> 60 % win-rate vs the opponent pool". In a
-**symmetric** N-player free-for-all this is provably unreachable: at a symmetric
-Nash equilibrium all identical policies are interchangeable, so each wins exactly
-`1/N` (0.25 at `N = 4`). You cannot dominate copies of yourself. Chasing 60 % vs a
-converged pool is therefore ill-posed. The two-demonstration framing measures the
-two things that *are* meaningful and achievable:
-
-- **Balance** (`~1/N`, decisive) shows self-play converged to a fair, skilled
-  equilibrium with no degenerate exploit.
-- **Dominance** (edge vs an untrained baseline) shows the learned behaviour is
-  genuinely skilful, not just mutually-cancelling.
+The original target was ">60 % win-rate vs the pool". In a **symmetric** N-player
+free-for-all this is provably unreachable: at a symmetric equilibrium all identical
+policies are interchangeable, so each wins exactly `1/N` (0.25 at N = 4). You cannot
+dominate copies of yourself. The three-behaviour framing measures what *is*
+meaningful: **balance** (converged to a fair equilibrium), **dominance** (skill vs an
+untrained baseline), and **active pushing** (the behaviour is real ejection, not a
+timer).
 
 ---
 
@@ -299,27 +281,20 @@ two things that *are* meaningful and achievable:
 
 Each fix only revealed the next failure:
 
-1. **Turtling** — survival reward (+0.01/step ×1000 = +10) beat winning (+3).
-   → rebalance.
-2. **Suicide** — a −0.01/step time penalty made dying (−1) cheaper than living.
-   → add explicit **win bonus**, shrink the time penalty.
-3. **Frictionless physics** — no damping ⇒ runaway drift-off; "winning" was just
-   being last to self-eliminate. → **joint damping**.
-4. **Too slow** — `F = 10` ⇒ can't reach an opponent in time. → **`F = 30`**.
-5. **Reward too sparse** — win never discovered by exploration. → **push shaping**.
-6. **Positional overfit** — agent 0 wins ~80 % of identical matches. → **rotation
-   randomisation**.
-7. **Defensive equilibrium** — self-play policy can't hunt a passive target
-   (0 % vs random). → **approach shaping** + **opponent curriculum**.
-8. **Self-elimination while chasing** — overshoots its own edge. → **edge
-   penalty**.
-9. **Draws** — competent agents avoid each other; skill invisible. → **storm**.
+1. **Turtling** — survival reward beat winning. → rebalance; add **win bonus**.
+2. **Suicide** — too-harsh time penalty made dying cheaper than living. → shrink it.
+3. **Frictionless physics** — runaway drift-off. → **joint damping**.
+4. **Reward too sparse** — a push-out never discovered. → **push shaping**.
+5. **Positional overfit** — agent 0 wins ~80 % of identical matches. → **rotation randomisation**.
+6. **Can't hunt a passive target** (0 % vs random). → **approach shaping** + **opponent curriculum**.
+7. **Melee caution at n ≥ 3** — committing exposes you; all draws. → **agent-count curriculum** + **draw = loss + high γ**.
+8. **Self-ejection ceiling** — agents overshoot the edge and die; dominance capped at −0.26 no matter the reward. → **light agents** (`d_brake < R_arena`) — the physics fix that unlocked all three targets at once.
 
 ---
 
 ## 13. Rendering
-`main.py` drives an episode and records video. The collision cylinder is drawn
-invisibly (alpha 0); a **visual-only** humanoid (density 0, no collision — so
-physics is unchanged) is drawn over it. A named disk geom is resized every frame
-to `R(t)` to visualise the closing storm. A framed camera + 720p offscreen buffer
-give the final clip (`demo_storm.mp4`).
+`main.py` drives an episode and records video. The collision cylinder is invisible
+(alpha 0); a **visual-only** humanoid (zero mass, no collision) is drawn over it, so
+physics is unchanged. Each agent keeps a fixed colour (`agent_0` = red) so the
+dominance demo (`--dominance`: only red runs the policy) reads at a glance. A framed
+tracking camera and a 720p offscreen buffer produce the final clips.
